@@ -137,6 +137,10 @@ struct NowPlayingView: View {
                 Image(systemName: "backward.fill").font(.title)
             }
             Spacer()
+            Button { player.seekBackward() } label: {
+                Image(systemName: "gobackward.15").font(.title2)
+            }
+            Spacer()
             Button { player.togglePlay() } label: {
                 ZStack {
                     if player.isLoading {
@@ -147,6 +151,10 @@ struct NowPlayingView: View {
                     }
                 }
                 .frame(width: 70, height: 70)
+            }
+            Spacer()
+            Button { player.seekForward() } label: {
+                Image(systemName: "goforward.15").font(.title2)
             }
             Spacer()
             Button { player.next() } label: {
