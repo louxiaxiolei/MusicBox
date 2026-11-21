@@ -103,8 +103,13 @@ struct SearchView: View {
             }
 
             if loading {
-                HStack { Spacer(); ProgressView(); Spacer() }
-                    .listRowSeparator(.hidden)
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    if !results.isEmpty { Text("正在加载全部结果…").font(.footnote).foregroundColor(.secondary) }
+                    Spacer()
+                }
+                .listRowSeparator(.hidden)
             } else if !isEnd && !results.isEmpty {
                 Button("加载更多") { runSearch(reset: false) }
                     .frame(maxWidth: .infinity)
@@ -125,18 +130,25 @@ struct SearchView: View {
         searched = kw
         error = nil
         loading = true
-        let p = page
         searchTask = Task { @MainActor in
-            do {
-                let res = try await plugin.search(kw, page: p)
-                if Task.isCancelled { return }
-                let existing = Set(results.map(\.id))
-                results += res.tracks.filter { !existing.contains($0.id) }
-                isEnd = res.isEnd || res.tracks.isEmpty
-                page = p + 1
-            } catch {
-                if Task.isCancelled { return }
-                self.error = error.localizedDescription
+            var p = page
+            // 自动连续加载后续页，直到最后一页为止，全部列出来（上限 100 页防失控，
+            // 搜索新关键词或切换音源会取消）
+            while p <= 100 {
+                do {
+                    let res = try await plugin.search(kw, page: p)
+                    if Task.isCancelled { return }
+                    let existing = Set(results.map(\.id))
+                    results += res.tracks.filter { !existing.contains($0.id) }
+                    isEnd = res.isEnd || res.tracks.isEmpty
+                    page = p + 1
+                    if isEnd { break }
+                } catch {
+                    if Task.isCancelled { return }
+                    self.error = error.localizedDescription
+                    break
+                }
+                p += 1
             }
             loading = false
         }
