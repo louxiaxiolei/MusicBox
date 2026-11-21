@@ -117,7 +117,7 @@ final class Plugin: Identifiable {
             let base = header.name.isEmpty ? "洛雪音源" : header.name
             let info = PluginInfo(name: "\(base) · \(displayName)",
                                   version: header.version, author: header.author,
-                                  srcUrl: "", hasSearch: true, hasLyric: false)
+                                  srcUrl: "", hasSearch: true, hasLyric: true)
             plugins.append(Plugin(id: "\(id)#\(source)", fileId: id, info: info, script: script,
                                   lxSource: source, lxQualitys: qualitys,
                                   headerName: header.name.isEmpty ? nil : header.name,
@@ -509,6 +509,14 @@ final class Plugin: Identifiable {
 
     func lyric(for track: Track) async throws -> String? {
         guard info.hasLyric else { return nil }
+        if let source = lxSource {
+            // 洛雪平台源本身不提供歌词，走兼容层内置的平台歌词
+            let data = try JSONSerialization.data(withJSONObject: track.rawObject)
+            let json = String(data: data, encoding: .utf8) ?? "{}"
+            let r = try await callBridge("__lxLyricBridge", [source, json], timeout: 30)
+            if let s = r as? String, !s.isEmpty { return s }
+            return nil
+        }
         let r = try await invoke("getLyric", [track.rawObject])
         if let s = r as? String { return s }
         if let d = r as? [String: Any] {
