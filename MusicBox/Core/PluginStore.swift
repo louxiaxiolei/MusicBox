@@ -27,7 +27,7 @@ final class PluginStore: ObservableObject {
             let id = file.deletingPathExtension().lastPathComponent
             guard let script = try? String(contentsOf: file, encoding: .utf8) else { continue }
             do {
-                loaded.append(try await Plugin.load(id: id, script: script))
+                loaded.append(contentsOf: try await Plugin.loadAll(id: id, script: script))
             } catch {
                 errors[file.lastPathComponent] = error.localizedDescription
             }
@@ -36,18 +36,19 @@ final class PluginStore: ObservableObject {
         loadErrors = errors
     }
 
-    /// 安装（或覆盖同名）插件，返回插件名
+    /// 安装（或覆盖同名）插件，返回插件名。洛雪脚本会展开成多个平台实例、共用一个文件。
     @discardableResult
     func install(script: String) async throws -> String {
         // 先用临时 id 校验，拿到插件名
-        let probe = try await Plugin.load(id: "probe", script: script)
-        let id = Self.fileId(for: probe.name)
-        let plugin = try await Plugin.load(id: id, script: script)
+        let probe = try await Plugin.loadAll(id: "probe", script: script)
+        guard let first = probe.first else { throw PluginError.load("空脚本") }
+        let id = Self.fileId(for: first.baseName)
+        let plugins = try await Plugin.loadAll(id: id, script: script)
         try script.write(to: dir.appendingPathComponent("\(id).js"), atomically: true, encoding: .utf8)
-        plugins.removeAll { $0.id == id }
-        plugins.append(plugin)
-        plugins.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return plugin.name
+        self.plugins.removeAll { $0.fileId == id }
+        self.plugins.append(contentsOf: plugins)
+        self.plugins.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return first.name
     }
 
     @discardableResult
@@ -72,8 +73,8 @@ final class PluginStore: ObservableObject {
     }
 
     func remove(_ plugin: Plugin) {
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(plugin.id).js"))
-        plugins.removeAll { $0.id == plugin.id }
+        try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(plugin.fileId).js"))
+        plugins.removeAll { $0.fileId == plugin.fileId }
     }
 
     func removeBroken(_ fileName: String) {
