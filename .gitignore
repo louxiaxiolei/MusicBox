@@ -1,0 +1,7 @@
+build/
+Payload/
+*.ipa
+*.xcodeproj/
+MusicBox/Info.plist
+xcodebuild.log
+.DS_Store
