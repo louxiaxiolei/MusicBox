@@ -47,14 +47,20 @@ struct NowPlayingView: View {
     }
 
     private var background: some View {
-        ZStack {
-            Color(.systemBackground)
-            if let img = player.artworkImage {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-                    .blur(radius: 60)
-                    .opacity(0.45)
+        // 背景图必须钉死在屏幕尺寸内：scaledToFill 不加 frame 会把整个布局撑得比屏幕宽，
+        // 导致标题、时间、边缘按钮被挤出屏幕（封面/进度条看起来满幅、两侧按钮消失）。
+        GeometryReader { geo in
+            ZStack {
+                Color(.systemBackground)
+                if let img = player.artworkImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
+                        .blur(radius: 60)
+                        .opacity(0.45)
+                }
             }
         }
         .ignoresSafeArea()
