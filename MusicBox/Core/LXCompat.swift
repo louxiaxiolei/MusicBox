@@ -606,4 +606,72 @@ function __lxSearchBridge(source, keyword, page, onOk, onErr) {
   });
 }
 
+// ===== 内置歌词（洛雪平台源本身不提供歌词，这里按平台补上，返回 LRC 文本） =====
+
+function __lxLrcTime(sec) {
+  var t = Math.max(0, parseFloat(sec) || 0);
+  var m = Math.floor(t / 60);
+  var s = t - m * 60;
+  return '[' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s.toFixed(2) + ']';
+}
+function __lxUnescape(s) {
+  return String(s || '').replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\\d+);/g, function (_, n) { return String.fromCharCode(parseInt(n, 10)); }).replace(/&amp;/g, '&');
+}
+
+var __lxLyricImpl = {
+  kw: async function (mi) {
+    var res = await http.get('https://www.kuwo.cn/openapi/v1/www/lyric/getlyric?musicId=' + encodeURIComponent(mi.songmid),
+      { timeout: 20000, headers: { 'Referer': 'https://www.kuwo.cn', 'User-Agent': 'Mozilla/5.0' } });
+    var list = (res.data && res.data.data && res.data.data.lrclist) || [];
+    if (!list.length) return null;
+    return list.map(function (l) { return __lxLrcTime(l.time) + (l.lineLyric || ''); }).join('\n');
+  },
+  wy: async function (mi) {
+    var res = await http.get('https://music.163.com/api/song/lyric?id=' + encodeURIComponent(mi.songmid) + '&lv=1&tv=1',
+      { timeout: 20000, headers: { 'Referer': 'https://music.163.com', 'User-Agent': 'Mozilla/5.0' } });
+    var lrc = res.data && res.data.lrc && res.data.lrc.lyric;
+    return lrc || null;
+  },
+  kg: async function (mi) {
+    var kw = encodeURIComponent((mi.name || '') + '-' + (mi.singer || ''));
+    var dur = Math.round((mi.interval || 0) * 1000);
+    var sres = await http.get('https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=' + kw + '&duration=' + dur + '&hash=' + encodeURIComponent(mi.hash || ''),
+      { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    var cand = sres.data && sres.data.candidates && sres.data.candidates[0];
+    if (!cand) return null;
+    var dres = await http.get('https://lyrics.kugou.com/download?ver=1&client=pc&id=' + cand.id + '&accesskey=' + cand.accesskey + '&fmt=lrc&charset=utf8',
+      { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    var content = dres.data && dres.data.content;
+    if (!content) return null;
+    return lx.utils.buffer.bufToString(lx.utils.buffer.from(content, 'base64'), 'utf8');
+  },
+  tx: async function (mi) {
+    var res = await http.get('https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=' + encodeURIComponent(mi.songmid) + '&format=json&nobase64=1&g_tk=5381',
+      { timeout: 20000, headers: { 'Referer': 'https://y.qq.com', 'User-Agent': 'Mozilla/5.0' } });
+    var lrc = res.data && res.data.lyric;
+    return lrc ? __lxUnescape(lrc) : null;
+  },
+  mg: async function (mi) {
+    var cid = mi.copyrightId || mi.songmid;
+    var res = await http.get('https://app.c.nf.migu.cn/MIGUM2.0/v1.0/content/resourceinfo.do?copyrightId=' + encodeURIComponent(cid) + '&resourceType=2',
+      { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    var r0 = res.data && res.data.resource && res.data.resource[0];
+    if (!r0 || !r0.lrcUrl) return null;
+    var lres = await http.get(r0.lrcUrl, { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    return (typeof lres.body === 'string' && lres.body) ? lres.body : null;
+  }
+};
+
+function __lxLyricBridge(source, musicInfoJSON, onOk, onErr) {
+  var impl = __lxLyricImpl[source];
+  if (!impl) { onOk('null'); return; }
+  var mi;
+  try { mi = JSON.parse(musicInfoJSON); } catch (e) { onOk('null'); return; }
+  impl(mi).then(function (lrc) {
+    onOk(JSON.stringify(lrc || null));
+  }, function () {
+    onOk('null');
+  });
+}
+
 """#
