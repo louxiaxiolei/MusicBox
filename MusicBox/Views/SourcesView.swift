@@ -263,6 +263,7 @@ struct FormatHelpView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("音源插件是一个 JavaScript 文件，接口与 MusicFree 插件基本一致（search / getMediaSource / getLyric）。")
+                    Text("也支持洛雪（LX Music）自定义源脚本：导入后会按脚本声明的平台展开成多个音源（酷我/酷狗/QQ/网易云/咪咕），搜索由应用内置实现，播放地址由脚本解析。")
                     Text("可用的内置对象").font(.headline)
                     Text("""
                     • axios（get/post/request，常用子集）
