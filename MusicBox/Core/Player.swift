@@ -184,6 +184,15 @@ final class Player: ObservableObject {
         updateNowPlaying()
     }
 
+    func seekForward(_ seconds: Double = 15) {
+        let target = duration > 0 ? min(currentTime + seconds, duration) : currentTime + seconds
+        seek(to: target)
+    }
+
+    func seekBackward(_ seconds: Double = 15) {
+        seek(to: max(currentTime - seconds, 0))
+    }
+
     // MARK: - 加载
 
     private func loadCurrent() {
@@ -343,6 +352,16 @@ final class Player: ObservableObject {
             guard let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
             let pos = e.positionTime
             Task { @MainActor in self?.seek(to: pos) }
+            return .success
+        }
+        c.skipForwardCommand.preferredIntervals = [15]
+        c.skipForwardCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.seekForward() }
+            return .success
+        }
+        c.skipBackwardCommand.preferredIntervals = [15]
+        c.skipBackwardCommand.addTarget { [weak self] _ in
+            Task { @MainActor in self?.seekBackward() }
             return .success
         }
     }
