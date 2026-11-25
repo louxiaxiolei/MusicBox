@@ -14,6 +14,8 @@ struct SearchView: View {
     @State private var error: String?
     @State private var searched = ""
     @State private var searchTask: Task<Void, Never>?
+    @State private var charts: [(id: String, name: String)] = []
+    @State private var chartTitle: String?
 
     private var selected: Plugin? {
         store.plugin(id: selectedId) ?? store.plugins.first
@@ -44,7 +46,9 @@ struct SearchView: View {
                         Menu {
                             Picker("音源", selection: Binding(
                                 get: { selected?.id ?? "" },
-                                set: { selectedId = $0; if !searched.isEmpty { runSearch(reset: true) } }
+                                set: { selectedId = $0
+                                       if chartTitle != nil { chartTitle = nil; results = [] }
+                                       if !searched.isEmpty { runSearch(reset: true) } }
                             )) {
                                 ForEach(store.plugins) { p in
                                     Text(p.name).tag(p.id)
@@ -60,6 +64,7 @@ struct SearchView: View {
                 }
             }
             .miniPlayerInset()
+            .task(id: selected?.id ?? "") { await loadCharts() }
         }
     }
 
@@ -78,11 +83,43 @@ struct SearchView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+                if !charts.isEmpty {
+                    Section {
+                        ForEach(charts, id: \.id) { chart in
+                            Button {
+                                loadChart(chart)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "chart.line.uptrend.xyaxis")
+                                        .foregroundColor(.pink)
+                                    Text(chart.name).foregroundColor(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("排行榜")
+                    }
+                }
             } else if results.isEmpty && !loading && error == nil {
                 Section { Text("没有找到「\(searched)」相关的歌曲").foregroundColor(.secondary) }
             }
 
             if !results.isEmpty {
+                if let chartTitle {
+                    Section {
+                        Button {
+                            self.chartTitle = nil
+                            results = []
+                        } label: {
+                            Label("返回排行榜", systemImage: "chevron.backward")
+                                .font(.footnote)
+                        }
+                    }
+                }
                 Section {
                     ForEach(Array(results.enumerated()), id: \.element.id) { i, track in
                         TrackRow(track: track)
@@ -90,7 +127,7 @@ struct SearchView: View {
                     }
                 } header: {
                     HStack {
-                        Text("\(selected?.name ?? "") · \(results.count) 首")
+                        Text(chartTitle != nil ? "\(chartTitle!) · \(results.count) 首" : "\(selected?.name ?? "") · \(results.count) 首")
                         Spacer()
                         Button {
                             player.play(results, startAt: 0)
@@ -126,6 +163,7 @@ struct SearchView: View {
             results = []
             page = 1
             isEnd = true
+            chartTitle = nil
         }
         searched = kw
         error = nil
@@ -149,6 +187,39 @@ struct SearchView: View {
                     break
                 }
                 p += 1
+            }
+            loading = false
+        }
+    }
+
+    private func loadCharts() async {
+        guard let plugin = selected, plugin.supportsCharts else {
+            charts = []
+            return
+        }
+        let pid = plugin.id
+        if let list = try? await plugin.charts(), selected?.id == pid {
+            charts = list
+        }
+    }
+
+    private func loadChart(_ chart: (id: String, name: String)) {
+        guard let plugin = selected else { return }
+        searchTask?.cancel()
+        results = []
+        searched = ""
+        error = nil
+        loading = true
+        searchTask = Task { @MainActor in
+            do {
+                let tracks = try await plugin.chartTracks(chart.id)
+                if Task.isCancelled { return }
+                results = tracks
+                isEnd = true
+                chartTitle = chart.name
+            } catch {
+                if Task.isCancelled { return }
+                self.error = error.localizedDescription
             }
             loading = false
         }
