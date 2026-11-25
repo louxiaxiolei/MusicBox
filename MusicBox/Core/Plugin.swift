@@ -524,4 +524,33 @@ final class Plugin: Identifiable {
         }
         return nil
     }
+
+    /// 是否支持排行榜：洛雪平台源由兼容层内置榜单（咪咕暂无可用榜单接口）
+    var supportsCharts: Bool {
+        guard let source = lxSource else { return false }
+        return source != "mg"
+    }
+
+    /// 当前平台的榜单列表 [(id, name)]
+    func charts() async throws -> [(id: String, name: String)] {
+        guard let source = lxSource else { return [] }
+        let r = try await callBridge("__lxChartsBridge", [source], timeout: 30)
+        guard let arr = r as? [Any] else { return [] }
+        return arr.compactMap { item in
+            guard let d = item as? [String: Any],
+                  let cid = d["id"] as? String, let name = d["name"] as? String else { return nil }
+            return (id: cid, name: name)
+        }
+    }
+
+    /// 某个榜单的歌曲（洛雪格式 → Track，取址/歌词走既有流程）
+    func chartTracks(_ chartId: String) async throws -> [Track] {
+        guard let source = lxSource else { return [] }
+        let r = try await callBridge("__lxChartSongsBridge", [source, chartId], timeout: 60)
+        guard let arr = r as? [Any] else { return [] }
+        return arr.compactMap { item in
+            guard let dict = item as? [String: Any] else { return nil }
+            return Track(pluginId: id, dict: dict)
+        }
+    }
 }
