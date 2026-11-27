@@ -14,7 +14,8 @@ struct SearchView: View {
     @State private var error: String?
     @State private var searched = ""
     @State private var searchTask: Task<Void, Never>?
-    @State private var charts: [(id: String, name: String)] = []
+    @State private var charts: [(id: String, name: String, img: String)] = []
+    @State private var artists: [(id: String, name: String, img: String)] = []
     @State private var chartTitle: String?
 
     private var selected: Plugin? {
@@ -90,8 +91,7 @@ struct SearchView: View {
                                 loadChart(chart)
                             } label: {
                                 HStack {
-                                    Image(systemName: "chart.line.uptrend.xyaxis")
-                                        .foregroundColor(.pink)
+                                    ArtworkView(url: chart.img.isEmpty ? nil : chart.img, size: 40)
                                     Text(chart.name).foregroundColor(.primary)
                                     Spacer()
                                     Image(systemName: "chevron.right")
@@ -102,6 +102,32 @@ struct SearchView: View {
                         }
                     } header: {
                         Text("排行榜")
+                    }
+                }
+                if !artists.isEmpty {
+                    Section {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 16) {
+                                ForEach(artists, id: \.id) { artist in
+                                    Button {
+                                        loadArtist(artist)
+                                    } label: {
+                                        VStack(spacing: 6) {
+                                            ArtworkView(url: artist.img.isEmpty ? nil : artist.img, size: 60, corner: 30)
+                                            Text(artist.name)
+                                                .font(.caption)
+                                                .foregroundColor(.primary)
+                                                .lineLimit(1)
+                                                .frame(width: 64)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    } header: {
+                        Text("歌手榜")
                     }
                 }
             } else if results.isEmpty && !loading && error == nil {
@@ -115,7 +141,7 @@ struct SearchView: View {
                             self.chartTitle = nil
                             results = []
                         } label: {
-                            Label("返回排行榜", systemImage: "chevron.backward")
+                            Label("返回", systemImage: "chevron.backward")
                                 .font(.footnote)
                         }
                     }
@@ -193,17 +219,25 @@ struct SearchView: View {
     }
 
     private func loadCharts() async {
-        guard let plugin = selected, plugin.supportsCharts else {
+        guard let plugin = selected else {
             charts = []
+            artists = []
             return
         }
         let pid = plugin.id
-        if let list = try? await plugin.charts(), selected?.id == pid {
+        if plugin.supportsCharts, let list = try? await plugin.charts(), selected?.id == pid {
             charts = list
+        } else if !plugin.supportsCharts {
+            charts = []
+        }
+        if plugin.supportsArtists, let list = try? await plugin.artists(), selected?.id == pid {
+            artists = list
+        } else if !plugin.supportsArtists {
+            artists = []
         }
     }
 
-    private func loadChart(_ chart: (id: String, name: String)) {
+    private func loadChart(_ chart: (id: String, name: String, img: String)) {
         guard let plugin = selected else { return }
         searchTask?.cancel()
         results = []
@@ -217,6 +251,28 @@ struct SearchView: View {
                 results = tracks
                 isEnd = true
                 chartTitle = chart.name
+            } catch {
+                if Task.isCancelled { return }
+                self.error = error.localizedDescription
+            }
+            loading = false
+        }
+    }
+
+    private func loadArtist(_ artist: (id: String, name: String, img: String)) {
+        guard let plugin = selected else { return }
+        searchTask?.cancel()
+        results = []
+        searched = ""
+        error = nil
+        loading = true
+        searchTask = Task { @MainActor in
+            do {
+                let tracks = try await plugin.artistTracks(artist.id)
+                if Task.isCancelled { return }
+                results = tracks
+                isEnd = true
+                chartTitle = "\(artist.name) 的热门歌曲"
             } catch {
                 if Task.isCancelled { return }
                 self.error = error.localizedDescription
