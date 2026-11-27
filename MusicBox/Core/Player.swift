@@ -118,6 +118,36 @@ final class Player: ObservableObject {
         if isPlaying { pause() } else { resume() }
     }
 
+    // MARK: - 定时关闭
+
+    /// 定时关闭的截止时间（nil = 未设定）
+    @Published private(set) var sleepDeadline: Date?
+    private var sleepTask: Task<Void, Never>?
+
+    /// 设定定时关闭：minutes 分钟后自动暂停播放
+    func setSleepTimer(minutes: Int) {
+        guard minutes > 0 else { return }
+        sleepTask?.cancel()
+        let deadline = Date().addingTimeInterval(Double(minutes) * 60)
+        sleepDeadline = deadline
+        sleepTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                guard let self, self.sleepDeadline == deadline else { return }
+                self.pause()
+                self.sleepDeadline = nil
+                self.sleepTask = nil
+            }
+        }
+    }
+
+    func cancelSleepTimer() {
+        sleepTask?.cancel()
+        sleepTask = nil
+        sleepDeadline = nil
+    }
+
     func pause() {
         player.pause()
         isPlaying = false
