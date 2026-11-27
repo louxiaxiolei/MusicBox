@@ -51,6 +51,12 @@ final class Player: ObservableObject {
             let item = note.object as AnyObject?
             Task { @MainActor in
                 guard let self, item === self.player.currentItem else { return }
+                if self.sleepAfterCurrentTrack {
+                    self.sleepAfterCurrentTrack = false
+                    self.pause()
+                    self.seek(to: 0)
+                    return
+                }
                 self.next(auto: true)
             }
         }
@@ -128,12 +134,15 @@ final class Player: ObservableObject {
 
     /// 定时关闭的截止时间（nil = 未设定）
     @Published private(set) var sleepDeadline: Date?
+    /// 「播完这首后关闭」是否已设定
+    @Published private(set) var sleepAfterCurrentTrack = false
     private var sleepTask: Task<Void, Never>?
 
     /// 设定定时关闭：minutes 分钟后自动暂停播放
     func setSleepTimer(minutes: Int) {
         guard minutes > 0 else { return }
         sleepTask?.cancel()
+        sleepAfterCurrentTrack = false
         let deadline = Date().addingTimeInterval(Double(minutes) * 60)
         sleepDeadline = deadline
         sleepTask = Task { [weak self] in
@@ -148,10 +157,19 @@ final class Player: ObservableObject {
         }
     }
 
+    /// 设定「播完这首后关闭」：当前歌曲放完就停，不切下一首
+    func setSleepAfterCurrentTrack() {
+        sleepTask?.cancel()
+        sleepTask = nil
+        sleepDeadline = nil
+        sleepAfterCurrentTrack = true
+    }
+
     func cancelSleepTimer() {
         sleepTask?.cancel()
         sleepTask = nil
         sleepDeadline = nil
+        sleepAfterCurrentTrack = false
     }
 
     func pause() {
