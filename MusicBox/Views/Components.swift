@@ -42,19 +42,26 @@ struct TrackRow: View {
     @EnvironmentObject var store: PluginStore
 
     var isCurrent: Bool { player.current == track }
+    var isFailed: Bool { player.failedTrackIDs.contains(track.id) }
 
     var body: some View {
         HStack(spacing: 12) {
             ArtworkView(url: track.artwork)
+                .opacity(isFailed ? 0.45 : 1)
             VStack(alignment: .leading, spacing: 3) {
                 Text(track.title)
                     .font(.body)
-                    .foregroundColor(isCurrent ? .accentColor : .primary)
+                    .foregroundColor(isCurrent ? .accentColor : (isFailed ? .secondary : .primary))
                     .lineLimit(1)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+                if isFailed {
+                    Text("播放失败，已自动跳过")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
             }
             Spacer(minLength: 4)
             if isCurrent && player.isPlaying {
