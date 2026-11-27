@@ -853,6 +853,53 @@ var __lxChartsImpl = {
   }
 };
 
+__lxChartsImpl.listAll = async function (source) {
+  if (source === 'kg') {
+    var r = await http.get('http://mobilecdnbj.kugou.com/api/v3/rank/list?version=9108&plat=0&showtype=2&parentid=0&apiver=6&area_code=1',
+      { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    var info = (r.data && r.data.data && r.data.data.info) || [];
+    var seen = {};
+    var out = [];
+    info.forEach(function (it) {
+      if (!it.rankname || seen[it.rankid]) return;
+      seen[it.rankid] = true;
+      out.push({ id: String(it.rankid), name: it.rankname, img: String(it.img_cover || it.img_9 || it.album_img_9 || '').replace('{size}', '400') });
+    });
+    return out;
+  }
+  if (source === 'wy') {
+    var rw = await http.get('https://music.163.com/api/toplist',
+      { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://music.163.com' } });
+    var list = (rw.data && rw.data.list) || [];
+    return list.map(function (it) {
+      return { id: String(it.id), name: it.name, img: it.coverImgUrl || '' };
+    });
+  }
+  if (source === 'tx') {
+    var body = JSON.stringify({ toplist: { module: 'musicToplist.ToplistInfoServer', method: 'GetAll', param: {} } });
+    var rt = await http.post('https://u.y.qq.com/cgi-bin/musicu.fcg?format=json', body,
+      { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://y.qq.com', 'Content-Type': 'application/json' } });
+    var groups = (rt.data && rt.data.toplist && rt.data.toplist.data && rt.data.toplist.data.group) || [];
+    var out2 = [];
+    groups.forEach(function (g) {
+      (g.toplist || []).forEach(function (t) {
+        out2.push({ id: String(t.topId), name: t.title, img: t.headPicUrl || t.frontPicUrl || t.picUrl || '' });
+      });
+    });
+    return out2;
+  }
+  // kw 只有已知的三个榜
+  return __lxChartsImpl.list(source);
+};
+
+function __lxAllChartsBridge(source, onOk, onErr) {
+  __lxChartsImpl.listAll(source).then(function (list) {
+    onOk(JSON.stringify(list));
+  }).catch(function (e) {
+    onErr(String((e && e.message) || e));
+  });
+}
+
 function __lxChartsBridge(source, onOk, onErr) {
   __lxChartsImpl.list(source).then(function (list) {
     onOk(JSON.stringify(list || []));
