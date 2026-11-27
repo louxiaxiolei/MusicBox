@@ -473,23 +473,32 @@ final class Plugin: Identifiable {
 
     func mediaSource(for track: Track, quality: String = "standard") async throws -> MediaSource {
         if let source = lxSource {
-            let q = lxQualitys.contains("320k") ? "320k" : (lxQualitys.first ?? "128k")
-            let infoObj: [String: Any] = ["musicInfo": track.rawObject, "type": q, "quality": q]
-            let infoData = try JSONSerialization.data(withJSONObject: infoObj)
-            let infoJSON = String(data: infoData, encoding: .utf8) ?? "{}"
-            let r = try await callBridge("__lxCallRequest", [source, "musicUrl", infoJSON], timeout: 60)
-            var urlStr: String?
-            var headers: [String: String] = [:]
-            if let s = r as? String {
-                urlStr = s
-            } else if let d = r as? [String: Any] {
-                urlStr = d["url"] as? String
-                headers = (d["headers"] as? [String: String]) ?? [:]
+            // 按用户首选音质取址：先试首选，失败自动降档（无损→320→128），
+            // 首选该源不支持时用它能提供的最接近的音质
+            let pref = UserDefaults.standard.string(forKey: "preferredQuality") ?? "320k"
+            let rank = ["128k", "320k", "flac"]
+            let declared = rank.filter { lxQualitys.contains($0) }
+            var candidates: [String] = []
+            if declared.isEmpty {
+                candidates = lxQualitys.isEmpty ? ["128k"] : lxQualitys
+            } else if let pi = rank.firstIndex(of: pref) {
+                if declared.contains(pref) { candidates.append(pref) }
+                candidates += declared.filter { (rank.firstIndex(of: $0) ?? 0) < pi }
+                    .sorted { (rank.firstIndex(of: $0) ?? 0) > (rank.firstIndex(of: $1) ?? 0) }
+                candidates += declared.filter { (rank.firstIndex(of: $0) ?? 0) > pi }
+                    .sorted { (rank.firstIndex(of: $0) ?? 0) < (rank.firstIndex(of: $1) ?? 0) }
+            } else {
+                candidates = declared
             }
-            guard let s = urlStr, let url = URL(string: s) else {
-                throw PluginError.badResult("没有拿到播放地址")
+            var lastError: Error = PluginError.badResult("没有拿到播放地址")
+            for q in candidates {
+                do {
+                    return try await lxMediaSource(source: source, quality: q, track: track)
+                } catch {
+                    lastError = error
+                }
             }
-            return MediaSource(url: url, headers: headers)
+            throw lastError
         }
         let r = try await invoke("getMediaSource", [track.rawObject, quality])
         var urlStr: String?
@@ -500,6 +509,26 @@ final class Plugin: Identifiable {
             urlStr = d["url"] as? String
             headers = (d["headers"] as? [String: String]) ?? [:]
             if let ua = d["userAgent"] as? String { headers["User-Agent"] = ua }
+        }
+        guard let s = urlStr, let url = URL(string: s) else {
+            throw PluginError.badResult("没有拿到播放地址")
+        }
+        return MediaSource(url: url, headers: headers)
+    }
+
+    /// 洛雪源按指定音质取址（mediaSource 的降级循环调用）
+    private func lxMediaSource(source: String, quality q: String, track: Track) async throws -> MediaSource {
+        let infoObj: [String: Any] = ["musicInfo": track.rawObject, "type": q, "quality": q]
+        let infoData = try JSONSerialization.data(withJSONObject: infoObj)
+        let infoJSON = String(data: infoData, encoding: .utf8) ?? "{}"
+        let r = try await callBridge("__lxCallRequest", [source, "musicUrl", infoJSON], timeout: 45)
+        var urlStr: String?
+        var headers: [String: String] = [:]
+        if let s = r as? String {
+            urlStr = s
+        } else if let d = r as? [String: Any] {
+            urlStr = d["url"] as? String
+            headers = (d["headers"] as? [String: String]) ?? [:]
         }
         guard let s = urlStr, let url = URL(string: s) else {
             throw PluginError.badResult("没有拿到播放地址")
@@ -535,6 +564,18 @@ final class Plugin: Identifiable {
     func charts() async throws -> [(id: String, name: String, img: String)] {
         guard let source = lxSource else { return [] }
         let r = try await callBridge("__lxChartsBridge", [source], timeout: 45)
+        guard let arr = r as? [Any] else { return [] }
+        return arr.compactMap { item in
+            guard let d = item as? [String: Any],
+                  let cid = d["id"] as? String, let name = d["name"] as? String else { return nil }
+            return (id: cid, name: name, img: (d["img"] as? String) ?? "")
+        }
+    }
+
+    /// 平台的全部榜单（「全部榜单」页用，酷狗 56 个、网易云 65 个、QQ 30 个）
+    func allCharts() async throws -> [(id: String, name: String, img: String)] {
+        guard let source = lxSource else { return [] }
+        let r = try await callBridge("__lxAllChartsBridge", [source], timeout: 45)
         guard let arr = r as? [Any] else { return [] }
         return arr.compactMap { item in
             guard let d = item as? [String: Any],
