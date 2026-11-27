@@ -4,6 +4,8 @@ struct LibraryView: View {
     @EnvironmentObject var library: Library
     @EnvironmentObject var player: Player
     @State private var segment = 0
+    @State private var showSettings = false
+    @AppStorage("preferredQuality") private var preferredQuality = "320k"
 
     private var tracks: [Track] { segment == 0 ? library.favorites : library.recent }
 
@@ -36,6 +38,11 @@ struct LibraryView: View {
             }
             .navigationTitle("我的")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     if !tracks.isEmpty {
                         Button {
@@ -53,6 +60,32 @@ struct LibraryView: View {
                 }
             }
             .miniPlayerInset()
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    Form {
+                        Section {
+                            Picker("默认音质", selection: $preferredQuality) {
+                                Text("标准 · 128k").tag("128k")
+                                Text("高品质 · 320k").tag("320k")
+                                Text("无损 · flac").tag("flac")
+                            }
+                            .pickerStyle(.inline)
+                            .labelsHidden()
+                        } header: {
+                            Text("播放音质")
+                        } footer: {
+                            Text("所选音质取址失败时会自动降一档重试；音源不支持所选音质时，用它能提供的最接近的音质。")
+                        }
+                    }
+                    .navigationTitle("设置")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") { showSettings = false }
+                        }
+                    }
+                }
+            }
         }
     }
 }
