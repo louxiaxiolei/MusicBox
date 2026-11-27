@@ -749,7 +749,7 @@ var __lxChartsImpl = {
             if ((info[c].rankname || '').indexOf(w) >= 0) { hit = info[c]; break; }
           }
         }
-        if (hit) out2.push({ id: String(hit.rankid), name: hit.rankname, img: hit.img_cover || hit.album_img_9 || '' });
+        if (hit) out2.push({ id: String(hit.rankid), name: hit.rankname, img: String(hit.img_cover || hit.img_9 || hit.album_img_9 || '').replace('{size}', '400') });
       });
       return out2;
     }
@@ -952,7 +952,23 @@ var __lxArtistsImpl = {
       var rk = await http.get('http://mobilecdnbj.kugou.com/api/v3/singer/song?version=9108&plat=0&singerid=' + encodeURIComponent(artistId) + '&pagesize=50&page=1&sorttype=2',
         { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0' } });
       var kinfo = (rk.data && rk.data.data && rk.data.data.info) || [];
-      return kinfo.map(function (it) { return __lxKgMap(it, ''); });
+      var klist = kinfo.map(function (it) { return __lxKgMap(it, ''); });
+      // 歌手歌曲接口不返回封面：按专辑逐个查专辑信息，把封面补上
+      var albumIds = [];
+      klist.forEach(function (m) {
+        if (!m.img && m.albumId && albumIds.indexOf(m.albumId) < 0) albumIds.push(m.albumId);
+      });
+      var covers = {};
+      await Promise.all(albumIds.map(async function (aid) {
+        try {
+          var ra = await http.get('http://mobilecdnbj.kugou.com/api/v3/album/info?version=9108&plat=0&albumid=' + encodeURIComponent(aid),
+            { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+          var u = ra.data && ra.data.data && ra.data.data.imgurl;
+          if (u) covers[aid] = String(u).replace('{size}', '400');
+        } catch (e) { /* 单张封面失败不影响列表 */ }
+      }));
+      klist.forEach(function (m) { if (!m.img && covers[m.albumId]) m.img = covers[m.albumId]; });
+      return klist;
     }
     if (source === 'wy') {
       var rw = await http.get('https://music.163.com/api/artist/' + encodeURIComponent(artistId),
