@@ -34,6 +34,16 @@ struct NowPlayingView: View {
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
                     .onTapGesture { withAnimation(.easeInOut) { showLyrics.toggle() } }
+                    .simultaneousGesture(
+                        // 播放页横滑切歌：左滑下一首、右滑上一首（点按仍是开关歌词）
+                        DragGesture(minimumDistance: 24)
+                            .onEnded { value in
+                                let dx = value.translation.width
+                                let dy = value.translation.height
+                                guard abs(dx) > 60, abs(dx) > 2 * abs(dy) else { return }
+                                if dx < 0 { player.next() } else { player.previous() }
+                            }
+                    )
 
                     info(t)
                     progress
