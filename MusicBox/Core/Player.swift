@@ -269,10 +269,22 @@ final class Player: ObservableObject {
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
-                guard let plugin = self.store?.plugin(id: track.pluginId) else {
+                let plugin = self.store?.plugin(id: track.pluginId)
+                if let plugin { self.loadExtras(track, plugin: plugin) }
+                // 本地缓存优先：不用取址、断网也能播
+                if let local = AudioCache.shared.cachedURL(for: track) {
+                    let item = AVPlayerItem(url: local)
+                    self.observe(item)
+                    self.player.replaceCurrentItem(with: item)
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                    self.player.play()
+                    self.isPlaying = true
+                    self.updateNowPlaying()
+                    return
+                }
+                guard let plugin else {
                     throw PluginError.call("找不到音源「\(track.pluginId)」，可能已被删除")
                 }
-                self.loadExtras(track, plugin: plugin)
                 let src: MediaSource
                 if let cached = self.prefetchedSource.removeValue(forKey: track.id) {
                     src = cached
@@ -289,6 +301,7 @@ final class Player: ObservableObject {
                 self.player.play()
                 self.isPlaying = true
                 self.updateNowPlaying()
+                AudioCache.shared.store(source: src, for: track)
             } catch {
                 if Task.isCancelled { return }
                 self.handleFailure(track, error)
