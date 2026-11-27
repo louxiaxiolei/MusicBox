@@ -619,6 +619,45 @@ function __lxUnescape(s) {
   return String(s || '').replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#(\\d+);/g, function (_, n) { return String.fromCharCode(parseInt(n, 10)); }).replace(/&amp;/g, '&');
 }
 
+
+// 把翻译歌词并进原文 LRC：同时间戳的译文写成 [时间]<T>译文，App 解析时挂到对应行下方
+function __lxMergeTransLrc(lrc, trans) {
+  if (!trans) return lrc;
+  var tagRe = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
+  function timesOf(line) {
+    tagRe.lastIndex = 0;
+    var m; var last = null; var times = [];
+    while ((m = tagRe.exec(line))) {
+      var frac = m[3] ? parseFloat('0.' + m[3]) : 0;
+      times.push({ t: parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + frac, tag: m[0] });
+      last = m;
+    }
+    return { times: times, contentStart: last ? last.index + last[0].length : -1 };
+  }
+  var tmap = {};
+  String(trans).split('\n').forEach(function (line) {
+    var info = timesOf(line);
+    if (!info.times.length || info.contentStart < 0) return;
+    var content = line.slice(info.contentStart).trim();
+    if (!content) return;
+    info.times.forEach(function (x) { tmap[x.t.toFixed(2)] = content; });
+  });
+  if (!Object.keys(tmap).length) return lrc;
+  var out = [];
+  String(lrc).split('\n').forEach(function (line) {
+    out.push(line);
+    var info = timesOf(line);
+    if (!info.times.length) return;
+    var tt = info.times[info.times.length - 1];
+    var tr = tmap[tt.t.toFixed(2)];
+    if (!tr) {
+      for (var k in tmap) { if (Math.abs(parseFloat(k) - tt.t) <= 0.6) { tr = tmap[k]; break; } }
+    }
+    if (tr) out.push(tt.tag + '<T>' + tr);
+  });
+  return out.join('\n');
+}
+
 var __lxLyricImpl = {
   kw: async function (mi) {
     var res = await http.get('https://www.kuwo.cn/openapi/v1/www/lyric/getlyric?musicId=' + encodeURIComponent(mi.songmid),
@@ -631,7 +670,9 @@ var __lxLyricImpl = {
     var res = await http.get('https://music.163.com/api/song/lyric?id=' + encodeURIComponent(mi.songmid) + '&lv=1&tv=1',
       { timeout: 20000, headers: { 'Referer': 'https://music.163.com', 'User-Agent': 'Mozilla/5.0' } });
     var lrc = res.data && res.data.lrc && res.data.lrc.lyric;
-    return lrc || null;
+    if (!lrc) return null;
+    var trans = res.data && res.data.tlyric && res.data.tlyric.lyric;
+    return __lxMergeTransLrc(lrc, trans);
   },
   kg: async function (mi) {
     var kw = encodeURIComponent((mi.name || '') + '-' + (mi.singer || ''));
@@ -650,7 +691,9 @@ var __lxLyricImpl = {
     var res = await http.get('https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=' + encodeURIComponent(mi.songmid) + '&format=json&nobase64=1&g_tk=5381',
       { timeout: 20000, headers: { 'Referer': 'https://y.qq.com', 'User-Agent': 'Mozilla/5.0' } });
     var lrc = res.data && res.data.lyric;
-    return lrc ? __lxUnescape(lrc) : null;
+    if (!lrc) return null;
+    var ttrans = res.data && res.data.trans;
+    return __lxMergeTransLrc(__lxUnescape(lrc), ttrans ? __lxUnescape(ttrans) : null);
   },
   mg: async function (mi) {
     var cid = mi.copyrightId || mi.songmid;
