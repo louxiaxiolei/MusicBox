@@ -179,6 +179,20 @@ struct SearchView: View {
             }
         }
         .listStyle(.plain)
+        // 榜单/歌手歌曲列表里支持横滑返回（左上角「返回」按钮保留）：
+        // 右滑只认从屏幕左边缘起手，避免和歌曲行右滑「下一首」冲突；左滑任意位置起手都行。
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24)
+                .onEnded { value in
+                    guard chartTitle != nil else { return }
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dx) > 90, abs(dx) > 2.2 * abs(dy) else { return }
+                    if dx > 0 && value.startLocation.x > 36 { return }
+                    chartTitle = nil
+                    results = []
+                }
+        )
     }
 
     private func runSearch(reset: Bool) {
