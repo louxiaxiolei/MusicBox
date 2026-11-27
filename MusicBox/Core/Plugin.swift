@@ -531,15 +531,15 @@ final class Plugin: Identifiable {
         return source != "mg"
     }
 
-    /// 当前平台的榜单列表 [(id, name)]
-    func charts() async throws -> [(id: String, name: String)] {
+    /// 当前平台的榜单列表 [(id, name, img)]
+    func charts() async throws -> [(id: String, name: String, img: String)] {
         guard let source = lxSource else { return [] }
-        let r = try await callBridge("__lxChartsBridge", [source], timeout: 30)
+        let r = try await callBridge("__lxChartsBridge", [source], timeout: 45)
         guard let arr = r as? [Any] else { return [] }
         return arr.compactMap { item in
             guard let d = item as? [String: Any],
                   let cid = d["id"] as? String, let name = d["name"] as? String else { return nil }
-            return (id: cid, name: name)
+            return (id: cid, name: name, img: (d["img"] as? String) ?? "")
         }
     }
 
@@ -547,6 +547,35 @@ final class Plugin: Identifiable {
     func chartTracks(_ chartId: String) async throws -> [Track] {
         guard let source = lxSource else { return [] }
         let r = try await callBridge("__lxChartSongsBridge", [source, chartId], timeout: 60)
+        guard let arr = r as? [Any] else { return [] }
+        return arr.compactMap { item in
+            guard let dict = item as? [String: Any] else { return nil }
+            return Track(pluginId: id, dict: dict)
+        }
+    }
+
+    /// 是否支持歌手榜（酷狗/网易云/QQ 有平台歌手榜接口，酷我/咪咕暂无）
+    var supportsArtists: Bool {
+        guard let source = lxSource else { return false }
+        return source == "kg" || source == "wy" || source == "tx"
+    }
+
+    /// 热门歌手列表 [(id, name, img)]
+    func artists() async throws -> [(id: String, name: String, img: String)] {
+        guard let source = lxSource else { return [] }
+        let r = try await callBridge("__lxArtistsBridge", [source], timeout: 30)
+        guard let arr = r as? [Any] else { return [] }
+        return arr.compactMap { item in
+            guard let d = item as? [String: Any],
+                  let aid = d["id"] as? String, let name = d["name"] as? String else { return nil }
+            return (id: aid, name: name, img: (d["img"] as? String) ?? "")
+        }
+    }
+
+    /// 某位歌手的热门歌曲
+    func artistTracks(_ artistId: String) async throws -> [Track] {
+        guard let source = lxSource else { return [] }
+        let r = try await callBridge("__lxArtistSongsBridge", [source, artistId], timeout: 60)
         guard let arr = r as? [Any] else { return [] }
         return arr.compactMap { item in
             guard let dict = item as? [String: Any] else { return nil }
