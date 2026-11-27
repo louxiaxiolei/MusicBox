@@ -195,8 +195,11 @@ struct NowPlayingView: View {
             Spacer()
             Button { showTimerOptions = true } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: player.sleepDeadline != nil ? "moon.zzz.fill" : "moon.zzz")
-                    if player.sleepDeadline != nil {
+                    Image(systemName: (player.sleepDeadline != nil || player.sleepAfterCurrentTrack) ? "moon.zzz.fill" : "moon.zzz")
+                    if player.sleepAfterCurrentTrack {
+                        Text("本首后停")
+                            .font(.caption)
+                    } else if player.sleepDeadline != nil {
                         TimelineView(.periodic(from: .now, by: 20)) { _ in
                             Text(sleepRemainingText)
                                 .font(.caption)
@@ -205,7 +208,7 @@ struct NowPlayingView: View {
                     }
                 }
             }
-            .foregroundColor(player.sleepDeadline != nil ? .accentColor : .secondary)
+            .foregroundColor((player.sleepDeadline != nil || player.sleepAfterCurrentTrack) ? .accentColor : .secondary)
             Spacer()
             Text(modeName).font(.caption).foregroundColor(.secondary)
             Spacer()
@@ -216,11 +219,12 @@ struct NowPlayingView: View {
         .font(.title3)
         .foregroundColor(.secondary)
         .confirmationDialog("定时关闭", isPresented: $showTimerOptions, titleVisibility: .visible) {
+            Button("播完这首后关闭") { player.setSleepAfterCurrentTrack() }
             ForEach([10, 15, 30, 45, 60, 90], id: \.self) { m in
                 Button("\(m) 分钟后关闭") { player.setSleepTimer(minutes: m) }
             }
             Button("自定义…") { showCustomTimer = true }
-            if player.sleepDeadline != nil {
+            if player.sleepDeadline != nil || player.sleepAfterCurrentTrack {
                 Button("取消定时关闭", role: .destructive) { player.cancelSleepTimer() }
             }
         }
