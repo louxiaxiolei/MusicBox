@@ -15,6 +15,8 @@ final class Player: ObservableObject {
     @Published private(set) var lyrics: [LyricLine] = []
     @Published private(set) var artworkImage: UIImage?
     @Published var errorMessage: String?
+    /// 取址/播放失败过的歌曲 id（列表里会置灰并标「播放失败」）
+    @Published private(set) var failedTrackIDs: Set<String> = []
     @Published var mode: PlayMode = PlayMode(rawValue: UserDefaults.standard.string(forKey: "playMode") ?? "") ?? .sequence {
         didSet { UserDefaults.standard.set(mode.rawValue, forKey: "playMode") }
     }
@@ -28,7 +30,9 @@ final class Player: ObservableObject {
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var loadTask: Task<Void, Never>?
-    private var consecutiveFailures = 0
+    /// 下一首的预解析地址（切歌时直接用，不用再等取址）
+    private var prefetchedSource: [String: MediaSource] = [:]
+    private var prefetchTask: Task<Void, Never>?
 
     init() {
         let session = AVAudioSession.sharedInstance()
@@ -76,6 +80,8 @@ final class Player: ObservableObject {
         guard tracks.indices.contains(i) else { return }
         queue = tracks
         index = i
+        failedTrackIDs = []
+        prefetchedSource = [:]
         loadCurrent()
     }
 
@@ -168,6 +174,8 @@ final class Player: ObservableObject {
 
     func stop() {
         loadTask?.cancel()
+        prefetchTask?.cancel()
+        prefetchedSource = [:]
         player.pause()
         player.replaceCurrentItem(with: nil)
         queue = []
@@ -247,7 +255,12 @@ final class Player: ObservableObject {
                     throw PluginError.call("找不到音源「\(track.pluginId)」，可能已被删除")
                 }
                 self.loadExtras(track, plugin: plugin)
-                let src = try await plugin.mediaSource(for: track)
+                let src: MediaSource
+                if let cached = self.prefetchedSource.removeValue(forKey: track.id) {
+                    src = cached
+                } else {
+                    src = try await plugin.mediaSource(for: track)
+                }
                 if Task.isCancelled { return }
                 var options: [String: Any] = [:]
                 if !src.headers.isEmpty { options["AVURLAssetHTTPHeaderFieldsKey"] = src.headers }
@@ -268,15 +281,38 @@ final class Player: ObservableObject {
     private func handleFailure(_ track: Track, _ error: Error) {
         isLoading = false
         isPlaying = false
+        failedTrackIDs.insert(track.id)
         errorMessage = "《\(track.title)》播放失败：\(error.localizedDescription)"
         updateNowPlaying()
-        consecutiveFailures += 1
-        if consecutiveFailures < 3 && queue.count > 1 {
-            Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                guard let self, self.current == track else { return }
-                self.next()
+        // 队列里还有没失败过的歌就自动跳过去，全都失败了才停下来
+        guard queue.count > 1, failedTrackIDs.count < queue.count else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self, self.current == track else { return }
+            for step in 1...self.queue.count {
+                let i = (self.index + step) % self.queue.count
+                if !self.failedTrackIDs.contains(self.queue[i].id) {
+                    self.index = i
+                    self.loadCurrent()
+                    return
+                }
             }
+        }
+    }
+
+    /// 当前歌曲开始播后，提前把下一首的地址解析好，切歌时不用等
+    private func prefetchNext() {
+        guard mode != .shuffle, queue.count > 1 else { return }
+        let nextIdx = (index + 1) % queue.count
+        guard nextIdx != index else { return }
+        let next = queue[nextIdx]
+        guard !failedTrackIDs.contains(next.id), prefetchedSource[next.id] == nil,
+              let plugin = store?.plugin(id: next.pluginId) else { return }
+        prefetchTask?.cancel()
+        prefetchTask = Task { [weak self] in
+            guard let src = try? await plugin.mediaSource(for: next) else { return }
+            guard let self, !Task.isCancelled else { return }
+            self.prefetchedSource[next.id] = src
         }
     }
 
@@ -290,9 +326,10 @@ final class Player: ObservableObject {
                 switch status {
                 case .readyToPlay:
                     self.isLoading = false
-                    self.consecutiveFailures = 0
+                    if let t = self.current { self.failedTrackIDs.remove(t.id) }
                     if dur.isFinite && dur > 0 { self.duration = dur }
                     self.updateNowPlaying()
+                    self.prefetchNext()
                 case .failed:
                     if let t = self.current {
                         self.handleFailure(t, err ?? (PluginError.call("无法播放该地址") as Error))
