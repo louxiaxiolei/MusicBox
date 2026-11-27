@@ -83,12 +83,6 @@ struct TrackRow: View {
                 Label("复制歌名", systemImage: "doc.on.doc")
             }
         }
-        .swipeActions(edge: .leading) {
-            Button { player.playNext(track) } label: {
-                Label("下一首", systemImage: "text.insert")
-            }
-            .tint(.orange)
-        }
     }
 
     private var subtitle: String {
