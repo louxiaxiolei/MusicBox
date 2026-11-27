@@ -286,13 +286,21 @@ struct LyricsView: View {
                     VStack(spacing: 16) {
                         Color.clear.frame(height: 120)
                         ForEach(Array(player.lyrics.enumerated()), id: \.element.id) { i, line in
-                            Text(line.text.isEmpty ? "♪" : line.text)
-                                .font(i == currentIndex ? .title3.weight(.bold) : .body)
-                                .foregroundColor(i == currentIndex ? .primary : .secondary)
-                                .multilineTextAlignment(.center)
-                                .frame(maxWidth: .infinity)
-                                .id(i)
-                                .onTapGesture { player.seek(to: line.time) }
+                            VStack(spacing: 2) {
+                                Text(line.text.isEmpty ? "♪" : line.text)
+                                    .font(i == currentIndex ? .title3.weight(.bold) : .body)
+                                    .foregroundColor(i == currentIndex ? .primary : .secondary)
+                                    .multilineTextAlignment(.center)
+                                if let tr = line.translation, !tr.isEmpty {
+                                    Text(tr)
+                                        .font(.subheadline)
+                                        .foregroundColor(i == currentIndex ? .secondary : .secondary.opacity(0.65))
+                                        .multilineTextAlignment(.center)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .id(i)
+                            .onTapGesture { player.seek(to: line.time) }
                         }
                         Color.clear.frame(height: 160)
                     }
