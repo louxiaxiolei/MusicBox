@@ -5,7 +5,13 @@ struct LibraryView: View {
     @EnvironmentObject var player: Player
     @State private var segment = 0
     @State private var showSettings = false
+    @State private var cacheBytes: Int64 = 0
     @AppStorage("preferredQuality") private var preferredQuality = "320k"
+    @AppStorage("cacheLimitMB") private var cacheLimitMB = 500
+
+    private var cacheSizeText: String {
+        ByteCountFormatter.string(fromByteCount: cacheBytes, countStyle: .file)
+    }
 
     private var tracks: [Track] { segment == 0 ? library.favorites : library.recent }
 
@@ -76,7 +82,29 @@ struct LibraryView: View {
                         } footer: {
                             Text("所选音质取址失败时会自动降一档重试；音源不支持所选音质时，用它能提供的最接近的音质。")
                         }
+                        Section {
+                            Picker("缓存上限", selection: $cacheLimitMB) {
+                                Text("200 MB").tag(200)
+                                Text("500 MB").tag(500)
+                                Text("1 GB").tag(1024)
+                                Text("2 GB").tag(2048)
+                            }
+                            HStack {
+                                Text("当前占用")
+                                Spacer()
+                                Text(cacheSizeText).foregroundColor(.secondary)
+                            }
+                            Button("清除缓存", role: .destructive) {
+                                AudioCache.shared.clear()
+                                cacheBytes = 0
+                            }
+                        } header: {
+                            Text("听歌缓存")
+                        } footer: {
+                            Text("播过的歌会自动存到本地，重播直接放本地文件、断网也能听；超上限时先清最久没听的。")
+                        }
                     }
+                    .onAppear { cacheBytes = AudioCache.shared.totalBytes }
                     .navigationTitle("设置")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
