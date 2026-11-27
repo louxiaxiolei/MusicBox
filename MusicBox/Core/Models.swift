@@ -75,10 +75,13 @@ struct LyricLine: Identifiable, Hashable {
     let id = UUID()
     let time: Double
     let text: String
+    /// 该行的翻译（双语歌词，来自带 <T> 标记的行）
+    var translation: String?
 
-    /// 解析 LRC 歌词
+    /// 解析 LRC 歌词；文本以 <T> 开头的行是翻译，按时间戳合并到对应原文行
     static func parse(_ lrc: String) -> [LyricLine] {
         var result: [LyricLine] = []
+        var pendingTrans: [(time: Double, text: String)] = []
         let pattern = try! NSRegularExpression(pattern: #"\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]"#)
         for line in lrc.components(separatedBy: .newlines) {
             let ns = line as NSString
@@ -86,6 +89,8 @@ struct LyricLine: Identifiable, Hashable {
             guard let last = matches.last else { continue }
             let text = ns.substring(from: last.range.location + last.range.length)
                 .trimmingCharacters(in: .whitespaces)
+            let isTrans = text.hasPrefix("<T>")
+            let clean = isTrans ? String(text.dropFirst(3)).trimmingCharacters(in: .whitespaces) : text
             for m in matches {
                 let min = Double(ns.substring(with: m.range(at: 1))) ?? 0
                 let sec = Double(ns.substring(with: m.range(at: 2))) ?? 0
@@ -94,10 +99,28 @@ struct LyricLine: Identifiable, Hashable {
                     let f = ns.substring(with: m.range(at: 3))
                     frac = (Double(f) ?? 0) / pow(10, Double(f.count))
                 }
-                result.append(LyricLine(time: min * 60 + sec + frac, text: text))
+                let t = min * 60 + sec + frac
+                if isTrans {
+                    pendingTrans.append((time: t, text: clean))
+                } else {
+                    result.append(LyricLine(time: t, text: clean))
+                }
             }
         }
-        return result.sorted { $0.time < $1.time }
+        var merged = result.sorted { $0.time < $1.time }
+        for tr in pendingTrans where !tr.text.isEmpty {
+            var best: Int?
+            var bestDiff = 0.6
+            for (i, line) in merged.enumerated() {
+                let d = abs(line.time - tr.time)
+                if d <= bestDiff {
+                    bestDiff = d
+                    best = i
+                }
+            }
+            if let b = best { merged[b].translation = tr.text }
+        }
+        return merged
     }
 }
 
