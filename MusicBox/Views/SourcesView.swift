@@ -1,6 +1,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// 音源健康检测结果
+enum HealthState {
+    case checking
+    case ok
+    case warn(String)
+    case bad(String)
+}
+
 struct SourcesView: View {
     @EnvironmentObject var store: PluginStore
 
@@ -11,6 +19,8 @@ struct SourcesView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var showFormat = false
+    @State private var health: [String: HealthState] = [:]
+    @State private var checkingHealth = false
 
     var body: some View {
         NavigationStack {
@@ -32,7 +42,7 @@ struct SourcesView: View {
                 if !store.plugins.isEmpty {
                     Section("已安装") {
                         ForEach(store.plugins) { p in
-                            PluginRow(plugin: p)
+                            PluginRow(plugin: p, health: health[p.id])
                                 .contextMenu {
                                     if !p.info.srcUrl.isEmpty {
                                         Button { run { try await store.update(p); return "「\(p.name)」已更新" } } label: {
@@ -80,6 +90,20 @@ struct SourcesView: View {
             .navigationTitle("音源")
             .refreshable { await store.reloadAll() }
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if !store.plugins.isEmpty {
+                        Button {
+                            Task { await checkAllHealth() }
+                        } label: {
+                            if checkingHealth {
+                                ProgressView()
+                            } else {
+                                Label("检测", systemImage: "waveform.path.ecg")
+                            }
+                        }
+                        .disabled(checkingHealth)
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if busy {
                         ProgressView()
@@ -162,10 +186,58 @@ struct SourcesView: View {
         }
     }
 
+    /// 一键检测每个音源：先测搜索，再拿第一首歌测取址
+    private func checkAllHealth() async {
+        checkingHealth = true
+        for p in store.plugins {
+            health[p.id] = .checking
+            do {
+                let page = try await withTimeout(25) { try await p.search("周杰伦", page: 1) }
+                guard let first = page.tracks.first else {
+                    health[p.id] = .warn("搜索无结果")
+                    continue
+                }
+                do {
+                    _ = try await withTimeout(25) { try await p.mediaSource(for: first) }
+                    health[p.id] = .ok
+                } catch {
+                    health[p.id] = .warn("能搜不能播")
+                }
+            } catch {
+                health[p.id] = .bad("搜索失败")
+            }
+        }
+        checkingHealth = false
+    }
+
+    private func withTimeout<T>(_ seconds: Double, _ op: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await op() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw PluginError.call("检测超时")
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+
 }
 
 struct PluginRow: View {
     let plugin: Plugin
+    var health: HealthState?
+
+    private var healthInfo: (color: Color, text: String)? {
+        switch health {
+        case .checking: return (.gray, "检测中…")
+        case .ok: return (.green, "正常，能搜能播")
+        case .warn(let m): return (.orange, m)
+        case .bad(let m): return (.red, m)
+        case nil: return nil
+        }
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -184,6 +256,14 @@ struct PluginRow: View {
                 }
                 .font(.caption)
                 .foregroundColor(.secondary)
+                if let h = healthInfo {
+                    HStack(spacing: 4) {
+                        Circle().fill(h.color).frame(width: 7, height: 7)
+                        Text(h.text)
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
             }
         }
         .padding(.vertical, 2)
