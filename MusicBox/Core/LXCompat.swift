@@ -477,6 +477,7 @@ var __lxSearchImpl = {
         name: item.SONGNAME || item.NAME || '',
         singer: item.ARTIST || '',
         source: 'kw',
+        img: item.web_albumpic_short ? 'https://img1.kuwo.cn/star/albumcover/' + String(item.web_albumpic_short).replace(/^120\//, '500/') : '',
         albumName: item.ALBUM || '', albumId: String(item.ALBUMID || ''),
         interval: parseInt(item.DURATION || '0', 10) || 0,
         types: types
@@ -681,18 +682,44 @@ var __lxChartDefs = {
     { id: '93', name: '酷我飙升榜' },
     { id: '16', name: '酷我热歌榜' },
     { id: '17', name: '酷我新歌榜' }
-  ],
-  tx: [
-    { id: '26', name: '热歌榜' },
-    { id: '62', name: '飙升榜' },
-    { id: '27', name: '新歌榜' },
-    { id: '4', name: '流行指数榜' }
   ]
 };
 
 var __lxChartsImpl = {
   list: async function (source) {
-    if (__lxChartDefs[source]) return __lxChartDefs[source];
+    if (source === 'kw') {
+      var defs = __lxChartDefs.kw;
+      var outKw = [];
+      for (var k = 0; k < defs.length; k++) {
+        var imgKw = '';
+        try {
+          var rc = await http.get('http://kbangserver.kuwo.cn/ksong.s?from=pc&fmt=json&pn=0&rn=1&type=bang&data=content&id=' + defs[k].id,
+            { timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+          imgKw = (rc.data && rc.data.v9_pic2) || '';
+        } catch (e) { /* 封面拿不到就留空 */ }
+        outKw.push({ id: defs[k].id, name: defs[k].name, img: imgKw });
+      }
+      return outKw;
+    }
+    if (source === 'tx') {
+      var rtx = await http.post('https://u.y.qq.com/cgi-bin/musicu.fcg?format=json',
+        JSON.stringify({ toplist: { module: 'musicToplist.ToplistInfoServer', method: 'GetAll', param: {} } }),
+        { timeout: 20000, headers: { 'Referer': 'https://y.qq.com', 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json' } });
+      var groups = (rtx.data && rtx.data.toplist && rtx.data.toplist.data && rtx.data.toplist.data.group) || [];
+      var flat = [];
+      groups.forEach(function (g) { (g.toplist || []).forEach(function (t) { flat.push(t); }); });
+      var wantTx = [26, 62, 27, 4];
+      var outTx = [];
+      wantTx.forEach(function (wid) {
+        for (var t = 0; t < flat.length; t++) {
+          if (flat[t].topId === wid) {
+            outTx.push({ id: String(wid), name: flat[t].title || '', img: flat[t].headPicUrl || flat[t].frontPicUrl || flat[t].picUrl || '' });
+            break;
+          }
+        }
+      });
+      return outTx;
+    }
     if (source === 'wy') {
       var res = await http.get('https://music.163.com/api/toplist',
         { timeout: 20000, headers: { 'Referer': 'https://music.163.com', 'User-Agent': 'Mozilla/5.0' } });
@@ -701,7 +728,7 @@ var __lxChartsImpl = {
       var out = [];
       want.forEach(function (w) {
         for (var j = 0; j < all.length; j++) {
-          if (all[j].name === w) { out.push({ id: String(all[j].id), name: all[j].name }); break; }
+          if (all[j].name === w) { out.push({ id: String(all[j].id), name: all[j].name, img: all[j].coverImgUrl || '' }); break; }
         }
       });
       return out;
@@ -722,7 +749,7 @@ var __lxChartsImpl = {
             if ((info[c].rankname || '').indexOf(w) >= 0) { hit = info[c]; break; }
           }
         }
-        if (hit) out2.push({ id: String(hit.rankid), name: hit.rankname });
+        if (hit) out2.push({ id: String(hit.rankid), name: hit.rankname, img: hit.img_cover || hit.album_img_9 || '' });
       });
       return out2;
     }
@@ -836,6 +863,149 @@ function __lxChartsBridge(source, onOk, onErr) {
 
 function __lxChartSongsBridge(source, chartId, onOk, onErr) {
   __lxChartsImpl.songs(source, chartId).then(function (list) {
+    onOk(JSON.stringify(list || []));
+  }, function (e) {
+    onErr(String((e && e.message) || e));
+  });
+}
+
+// ===== 内置歌手榜（歌手列表 + 歌手热门歌曲，歌曲仍返回洛雪格式 musicInfo） =====
+
+function __lxKgMap(item, singerFallback) {
+  var types = [];
+  var hash320 = item.hash_high || item['320hash'];
+  if (item.hash) types.push({ type: '128k', hash: item.hash, size: __lxFmtSize(item.filesize) });
+  if (hash320) types.push({ type: '320k', hash: hash320, size: __lxFmtSize(item['320filesize']) });
+  if (item.sqhash) types.push({ type: 'flac', hash: item.sqhash, size: __lxFmtSize(item.sqfilesize) });
+  var singer = (item.authors || []).map(function (a) { return a.author_name; }).join(' / ');
+  if (!singer && item.filename) singer = String(item.filename).split(' - ')[0];
+  if (!singer) singer = singerFallback || '';
+  var songName = item.songname || '';
+  if (!songName && item.filename) {
+    var parts = String(item.filename).split(' - ');
+    if (parts.length > 1) songName = parts.slice(1).join(' - ');
+  }
+  return {
+    id: item.hash, songmid: item.hash, hash: item.hash,
+    name: songName,
+    singer: singer,
+    source: 'kg',
+    albumName: item.album_name || '', albumId: String(item.album_id || ''),
+    img: String(item.album_sizable_cover || '').replace('{size}', '400'),
+    interval: item.duration || 0,
+    types: types
+  };
+}
+
+function __lxWyMap(s) {
+  var types = [];
+  if (s.l) types.push({ type: '128k', size: __lxFmtSize(s.l.size) });
+  if (s.h) types.push({ type: '320k', size: __lxFmtSize(s.h.size) });
+  if (s.sq) types.push({ type: 'flac', size: __lxFmtSize(s.sq.size) });
+  if (s.hr) types.push({ type: 'flac24bit', size: __lxFmtSize(s.hr.size) });
+  if (!types.length) types.push({ type: '128k', size: '' });
+  var ar = s.ar || s.artists || [];
+  var al = s.al || s.album || {};
+  return {
+    id: String(s.id), songmid: String(s.id),
+    name: s.name || '',
+    singer: ar.map(function (a) { return a.name; }).join(' / '),
+    source: 'wy',
+    albumName: al.name || '', albumId: String(al.id || ''),
+    img: al.picUrl || '',
+    interval: Math.round((s.dt || s.duration || 0) / 1000),
+    types: types
+  };
+}
+
+var __lxArtistsImpl = {
+  list: async function (source) {
+    if (source === 'kg') {
+      var rk = await http.get('http://mobilecdnbj.kugou.com/api/v3/singer/list?version=9108&plat=0&sextype=0&type=1&hot=1&pagesize=30&page=1',
+        { timeout: 20000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      var kinfo = (rk.data && rk.data.data && rk.data.data.info) || [];
+      return kinfo.map(function (it) {
+        return { id: String(it.singerid), name: it.singername || '', img: String(it.imgurl || '').replace('{size}', '240') };
+      });
+    }
+    if (source === 'wy') {
+      var rw = await http.get('https://music.163.com/api/artist/list?type=-1&area=-1&initial=-1&offset=0&total=true&limit=30',
+        { timeout: 20000, headers: { 'Referer': 'https://music.163.com', 'User-Agent': 'Mozilla/5.0' } });
+      var wlist = (rw.data && rw.data.artists) || [];
+      return wlist.map(function (a) {
+        return { id: String(a.id), name: a.name || '', img: a.picUrl || '' };
+      });
+    }
+    if (source === 'tx') {
+      var rt = await http.get('https://c.y.qq.com/v8/fcg-bin/v8.fcg?channel=singer&page=list&key=all_all_all&pagesize=30&pagenum=1&format=json&inCharset=utf8&outCharset=utf-8',
+        { timeout: 20000, headers: { 'Referer': 'https://y.qq.com', 'User-Agent': 'Mozilla/5.0' } });
+      var tlist = ((rt.data && rt.data.data && rt.data.data.list) || []).slice(0, 30);
+      return tlist.map(function (it) {
+        return { id: it.Fsinger_mid, name: it.Fsinger_name || '', img: 'https://y.gtimg.cn/music/photo_new/T001R300x300M000' + it.Fsinger_mid + '.jpg' };
+      });
+    }
+    return [];
+  },
+
+  songs: async function (source, artistId) {
+    if (source === 'kg') {
+      var rk = await http.get('http://mobilecdnbj.kugou.com/api/v3/singer/song?version=9108&plat=0&singerid=' + encodeURIComponent(artistId) + '&pagesize=50&page=1&sorttype=2',
+        { timeout: 30000, headers: { 'User-Agent': 'Mozilla/5.0' } });
+      var kinfo = (rk.data && rk.data.data && rk.data.data.info) || [];
+      return kinfo.map(function (it) { return __lxKgMap(it, ''); });
+    }
+    if (source === 'wy') {
+      var rw = await http.get('https://music.163.com/api/artist/' + encodeURIComponent(artistId),
+        { timeout: 30000, headers: { 'Referer': 'https://music.163.com', 'User-Agent': 'Mozilla/5.0' } });
+      var hot = (rw.data && rw.data.hotSongs) || [];
+      var aname = (rw.data && rw.data.artist && rw.data.artist.name) || '';
+      return hot.map(function (s) {
+        var m = __lxWyMap(s);
+        if (!m.singer) m.singer = aname;
+        return m;
+      });
+    }
+    if (source === 'tx') {
+      var rt = await http.post('https://u.y.qq.com/cgi-bin/musicu.fcg?format=json',
+        JSON.stringify({ singerSongList: { module: 'musichall.song_list_server', method: 'GetSingerSongList', param: { singerMid: artistId, order: 1, number: 50, begin: 0 } } }),
+        { timeout: 30000, headers: { 'Referer': 'https://y.qq.com', 'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json' } });
+      var slist = (rt.data && rt.data.singerSongList && rt.data.singerSongList.data && rt.data.singerSongList.data.songList) || [];
+      return slist.map(function (entry) {
+        var item = entry.songInfo || {};
+        var f = item.file || {};
+        var types = [];
+        var s128 = f.size_128mp3 || f.size128 || 0, s320 = f.size_320mp3 || f.size320 || 0, sflac = f.size_flac || f.sizeflac || 0;
+        if (s128 > 0) types.push({ type: '128k', size: __lxFmtSize(s128) });
+        if (s320 > 0) types.push({ type: '320k', size: __lxFmtSize(s320) });
+        if (sflac > 0) types.push({ type: 'flac', size: __lxFmtSize(sflac) });
+        if (!types.length) types.push({ type: '128k', size: '' });
+        var alb = item.album || {};
+        return {
+          id: item.mid, songmid: item.mid, strMediaMid: f.media_mid || '',
+          name: __lxStripTags(item.name || item.title || ''),
+          singer: (item.singer || []).map(function (a) { return __lxStripTags(a.name); }).join(' / '),
+          source: 'tx',
+          albumName: alb.name || '', albumId: String(alb.id || ''), albumMid: alb.mid || '',
+          img: alb.mid ? 'https://y.gtimg.cn/music/photo_new/T002R300x300M000' + alb.mid + '.jpg' : '',
+          interval: item.interval || 0,
+          types: types
+        };
+      });
+    }
+    return [];
+  }
+};
+
+function __lxArtistsBridge(source, onOk, onErr) {
+  __lxArtistsImpl.list(source).then(function (list) {
+    onOk(JSON.stringify(list || []));
+  }, function (e) {
+    onErr(String((e && e.message) || e));
+  });
+}
+
+function __lxArtistSongsBridge(source, artistId, onOk, onErr) {
+  __lxArtistsImpl.songs(source, artistId).then(function (list) {
     onOk(JSON.stringify(list || []));
   }, function (e) {
     onErr(String((e && e.message) || e));
