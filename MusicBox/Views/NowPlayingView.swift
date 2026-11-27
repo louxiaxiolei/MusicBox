@@ -10,6 +10,9 @@ struct NowPlayingView: View {
     @State private var showQueue = false
     @State private var dragging = false
     @State private var dragValue: Double = 0
+    @State private var showTimerOptions = false
+    @State private var showCustomTimer = false
+    @State private var customMinutes = ""
 
     var body: some View {
         ZStack {
@@ -180,6 +183,20 @@ struct NowPlayingView: View {
                 Image(systemName: showLyrics ? "quote.bubble.fill" : "quote.bubble")
             }
             Spacer()
+            Button { showTimerOptions = true } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: player.sleepDeadline != nil ? "moon.zzz.fill" : "moon.zzz")
+                    if player.sleepDeadline != nil {
+                        TimelineView(.periodic(from: .now, by: 20)) { _ in
+                            Text(sleepRemainingText)
+                                .font(.caption)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+            .foregroundColor(player.sleepDeadline != nil ? .accentColor : .secondary)
+            Spacer()
             Text(modeName).font(.caption).foregroundColor(.secondary)
             Spacer()
             Button { dismiss() } label: {
@@ -188,6 +205,36 @@ struct NowPlayingView: View {
         }
         .font(.title3)
         .foregroundColor(.secondary)
+        .confirmationDialog("定时关闭", isPresented: $showTimerOptions, titleVisibility: .visible) {
+            ForEach([10, 15, 30, 45, 60, 90], id: \.self) { m in
+                Button("\(m) 分钟后关闭") { player.setSleepTimer(minutes: m) }
+            }
+            Button("自定义…") { showCustomTimer = true }
+            if player.sleepDeadline != nil {
+                Button("取消定时关闭", role: .destructive) { player.cancelSleepTimer() }
+            }
+        }
+        .alert("自定义定时关闭", isPresented: $showCustomTimer) {
+            TextField("分钟", text: $customMinutes)
+                .keyboardType(.numberPad)
+            Button("设定") {
+                if let m = Int(customMinutes.trimmingCharacters(in: .whitespaces)), m > 0 {
+                    player.setSleepTimer(minutes: m)
+                }
+                customMinutes = ""
+            }
+            Button("取消", role: .cancel) { customMinutes = "" }
+        } message: {
+            Text("输入多少分钟后自动停止播放")
+        }
+    }
+
+    private var sleepRemainingText: String {
+        guard let d = player.sleepDeadline else { return "" }
+        let remain = max(0, Int(d.timeIntervalSinceNow))
+        if remain >= 3600 { return "\(remain / 3600)小时\((remain % 3600) / 60)分" }
+        if remain >= 60 { return "\(remain / 60)分钟" }
+        return "\(remain)秒"
     }
 
     private var modeName: String {
