@@ -18,6 +18,10 @@ struct SearchView: View {
     @State private var charts: [(id: String, name: String, img: String)] = []
     @State private var artists: [(id: String, name: String, img: String)] = []
     @State private var chartTitle: String?
+    @State private var searchHistory: [String] = UserDefaults.standard.stringArray(forKey: "searchHistory") ?? []
+    @State private var showAllCharts = false
+    @State private var allCharts: [(id: String, name: String, img: String)] = []
+    @State private var loadingAllCharts = false
 
     private var selected: Plugin? {
         store.plugin(id: selectedId) ?? store.plugins.first
@@ -85,6 +89,34 @@ struct SearchView: View {
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
+                if !searchHistory.isEmpty {
+                    Section {
+                        ForEach(searchHistory, id: \.self) { word in
+                            Button {
+                                keyword = word
+                                runSearch(reset: true)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .foregroundColor(.secondary)
+                                    Text(word).foregroundColor(.primary)
+                                    Spacer()
+                                }
+                            }
+                        }
+                    } header: {
+                        HStack {
+                            Text("最近搜索")
+                            Spacer()
+                            Button("清除") {
+                                searchHistory = []
+                                UserDefaults.standard.removeObject(forKey: "searchHistory")
+                            }
+                            .font(.footnote)
+                            .textCase(nil)
+                        }
+                    }
+                }
                 if !charts.isEmpty {
                     Section {
                         ForEach(charts, id: \.id) { chart in
@@ -95,6 +127,23 @@ struct SearchView: View {
                                     ArtworkView(url: chart.img.isEmpty ? nil : chart.img, size: 40)
                                     Text(chart.name).foregroundColor(.primary)
                                     Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        Button {
+                            Task { await openAllCharts() }
+                        } label: {
+                            HStack {
+                                Image(systemName: "list.number")
+                                    .foregroundColor(.pink)
+                                Text("全部榜单").foregroundColor(.primary)
+                                Spacer()
+                                if loadingAllCharts {
+                                    ProgressView()
+                                } else {
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
@@ -194,6 +243,48 @@ struct SearchView: View {
                     results = []
                 }
         )
+        .sheet(isPresented: $showAllCharts) { allChartsSheet }
+    }
+
+    private var allChartsSheet: some View {
+        NavigationStack {
+            List {
+                ForEach(allCharts, id: \.id) { chart in
+                    Button {
+                        showAllCharts = false
+                        loadChart(chart)
+                    } label: {
+                        HStack {
+                            ArtworkView(url: chart.img.isEmpty ? nil : chart.img, size: 40)
+                            Text(chart.name).foregroundColor(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("全部榜单")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("关闭") { showAllCharts = false }
+                }
+            }
+        }
+    }
+
+    private func openAllCharts() async {
+        guard let plugin = selected, plugin.supportsCharts, !loadingAllCharts else { return }
+        loadingAllCharts = true
+        let list = (try? await plugin.allCharts()) ?? []
+        loadingAllCharts = false
+        if !list.isEmpty {
+            allCharts = list
+            showAllCharts = true
+        }
     }
 
     private func runSearch(reset: Bool) {
@@ -205,6 +296,11 @@ struct SearchView: View {
             page = 1
             isEnd = true
             chartTitle = nil
+            // 记入搜索历史（最近的在前，最多 12 条）
+            var h = searchHistory.filter { $0 != kw }
+            h.insert(kw, at: 0)
+            searchHistory = Array(h.prefix(12))
+            UserDefaults.standard.set(searchHistory, forKey: "searchHistory")
         }
         searched = kw
         error = nil
